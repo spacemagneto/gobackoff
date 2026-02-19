@@ -76,6 +76,6 @@ func TestFullJitterStrategy(t *testing.T) {
 		fullJitter := &FullJitter{baseDelay: 0, maxDelay: 0}
 
 		delay := fullJitter.Next(5)
-		assert.Equal(t, time.Duration(0), delay)
+		assert.Equal(t, fullJitter.baseDelay, delay)
 	})
 }
