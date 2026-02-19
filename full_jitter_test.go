@@ -44,4 +44,21 @@ func TestFullJitterStrategy(t *testing.T) {
 
 		assert.Equal(t, baseDelay, jitter.maxDelay)
 	})
+
+	t.Run("ReturnsNextInStrictRange", func(t *testing.T) {
+		baseDelay := 100 * time.Millisecond
+		maxDelay := 10 * time.Second
+		jitter := NewFullJitter(baseDelay, maxDelay)
+
+		// For attempt = 3:
+		// limit = 100ms * 2^3 = 800ms
+		// Expected range [0, 800ms]
+		maxExpected := 800 * time.Millisecond
+
+		for i := 0; i < 15; i++ {
+			delay := jitter.Next(3)
+			assert.True(t, delay >= 0)
+			assert.True(t, delay <= maxExpected)
+		}
+	})
 }
