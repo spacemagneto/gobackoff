@@ -61,4 +61,14 @@ func TestFullJitterStrategy(t *testing.T) {
 			assert.True(t, delay <= maxExpected)
 		}
 	})
+
+	t.Run("CheckOverflow", func(t *testing.T) {
+		baseDelay := 1 * time.Second
+		maxDelay := 100 * time.Second
+		jitter := NewFullJitter(baseDelay, maxDelay)
+
+		delay := jitter.Next(63)
+		assert.LessOrEqual(t, delay, maxDelay)
+		assert.GreaterOrEqual(t, delay, time.Duration(0))
+	})
 }
