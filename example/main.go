@@ -31,7 +31,7 @@ func fetchDataWithRetry(ctx context.Context, url string) error {
 	maxAttempts := 5
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
 			return err
 		}
@@ -43,14 +43,14 @@ func fetchDataWithRetry(ctx context.Context, url string) error {
 		// 1. Network/DNS error (err != nil)
 		// 2. Server-side error (5xx)
 		// 3. Rate limiting (429)
-		if err != nil || (resp != nil && (resp.StatusCode >= 500 || resp.StatusCode == 429)) {
+		if err != nil || (resp != nil && (resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests)) {
 			if resp != nil {
 				_, _ = io.Copy(io.Discard, resp.Body)
 				_ = resp.Body.Close()
 			}
 
 			if attempt == maxAttempts-1 {
-				return fmt.Errorf("exhausted retries: last error was %v", err)
+				return fmt.Errorf("exhausted retries: last error was %w", err)
 			}
 
 			delay := b.Next(int64(attempt))
