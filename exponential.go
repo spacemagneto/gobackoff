@@ -10,8 +10,9 @@ import (
 // Delay follows formula: min(cap, base * step^attempt), attempts counted from 0 so first delay equals base
 // Fits baseline use or cases where client synchronization isnt risk under contention prefer jitter strategy
 type Exponential struct {
-	baseDelay, maxDelay time.Duration
-	step                float64
+	baseDelay time.Duration
+	maxDelay  time.Duration
+	step      float64
 
 	// NOTE: why i dont use mutex, atomic, why? isnt not solved race cond problem
 	// state belongs to retry chain, isnt shared strategy
