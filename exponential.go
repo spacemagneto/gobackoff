@@ -1,72 +1,59 @@
 package backoff
 
 import (
-	"math"
 	"time"
 )
 
-// Exponential implements a deterministic exponential backoff strategy.
-// Unlike Jitter strategies, this implementation is entirely predictable
-// and returns a fixed duration for a given attempt number.
+// Exponential implements deterministic exponential backoff strategy.
+// No randomness: every chain gets same sequence of delays.
 //
-// The delay follows the formula: baseDelay * (step ^ attempt).
-// It is typically used as a baseline for comparison or in scenarios
-// where client synchronization is not a significant risk.
+// Delay follows formula: min(cap, base * step^attempt), attempts counted from 0 so first delay equals base
+// Fits baseline use or cases where client synchronization isnt risk under contention prefer jitter strategy
 type Exponential struct {
 	baseDelay, maxDelay time.Duration
 	step                float64
+
+	// NOTE: why i dont use mutex, atomic, why? isnt not solved race cond problem
+	// state belongs to retry chain, isnt shared strategy
+	// look if first goroutine got err Next return 1s,
+	// second goroutine got error Next return 2s instead of 1s
+	// under load counter hits cap immediately and all goroutines sleep max delay
+	attempt int
 }
 
-// NewExponential initializes a new Exponential strategy using the DefaultStep.
-// If delay or max are less than or equal to zero, package defaults are used.
-func NewExponential(delay, max time.Duration) *Exponential {
-	return NewExponentialWithStep(delay, max, DefaultStep)
+// NewExponential creates Exponential strategy.
+// use pkg def if baseDelay or maxDelay is zero or negative
+// raises maxDelay to match baseDelay if maxDelay is smaller
+// growth factor def to DefaultStep unless WithStep is passed
+func NewExponential(baseDelay, maxDelay time.Duration, opts ...Option) *Exponential {
+	baseDelay, maxDelay = normalizeBounds(baseDelay, maxDelay)
+	o := applyOptions(opts)
+
+	return &Exponential{baseDelay: baseDelay, maxDelay: maxDelay, step: o.step}
 }
 
-// NewExponentialWithStep initializes an Exponential strategy with a custom growth factor.
-//
-// Arguments:
-//   - delay: The starting duration for the first attempt.
-//   - max: The absolute upper bound for any calculated delay.
-//   - step: The growth factor (e.g., 2.0 for binary exponential backoff).
-//     If step <= 1.0, DefaultStep is used to ensure growth.
-func NewExponentialWithStep(delay, max time.Duration, step float64) *Exponential {
-	if delay <= 0 {
-		delay = DefaultMinBackoff
-	}
+// Next returns delay for current attempt and advances to next one
+func (e *Exponential) Next() time.Duration {
+	delay := expLimit(e.baseDelay, e.maxDelay, e.step, e.attempt)
 
-	if max <= 0 {
-		max = DefaultMaxBackoff
-	}
-
-	if max < delay {
-		max = delay
-	}
-
-	if step <= 1.0 {
-		step = DefaultStep
-	}
-
-	return &Exponential{baseDelay: delay, maxDelay: max, step: step}
-}
-
-// Next calculates the delay for the given attempt.
-//
-// Arguments:
-//   - attempt: The current retry attempt number (1, 2, 3...).
-//
-// Returns:
-//
-//	A time.Duration representing the calculated delay, capped by maxDelay.
-//	If the calculation results in a value larger than the capacity of time.Duration
-//	or causes an overflow, maxDelay is returned.
-func (e *Exponential) Next(attempt int64) time.Duration {
-	// calculate the delay: base * step^attempt
-	delay := time.Duration(float64(e.baseDelay) * math.Pow(e.step, float64(attempt)))
-
-	if delay > e.maxDelay || delay < 0 {
-		return e.maxDelay
+	// counter stop at cap further growth changes nothing
+	// and endless retry loop would eventually overflow it
+	if delay < e.maxDelay {
+		e.attempt++
 	}
 
 	return delay
+}
+
+// Reset restarts chain from base delay
+func (e *Exponential) Reset() {
+	e.attempt = 0
+}
+
+// ExponentialDelay is stateless version of Exponential for callers tracking attempt number themselves
+// arguments are normalized same way as in NewExponential and WithStep negative attempt counts as 0
+func ExponentialDelay(baseDelay, maxDelay time.Duration, step float64, attempt int) time.Duration {
+	baseDelay, maxDelay = normalizeBounds(baseDelay, maxDelay)
+
+	return expLimit(baseDelay, maxDelay, normalizeStep(step), attempt)
 }
