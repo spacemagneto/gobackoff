@@ -1,4 +1,4 @@
-module github.com/spacemagneto/gobackoff
+module github.com/spacemagneto/gobackoff/v2
 
 go 1.24
 
