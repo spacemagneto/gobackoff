@@ -13,7 +13,7 @@ func TestFixedBackoffStrategy(t *testing.T) {
 	t.Run("InitStrategyWithoutDelay", func(t *testing.T) {
 		fixed := NewFixed(0)
 		assert.NotNil(t, fixed)
-		assert.Equal(t, 1*time.Second, fixed.delay)
+		assert.Equal(t, DefaultMinBackoff, fixed.delay)
 	})
 
 	t.Run("InitStrategyWithDelay", func(t *testing.T) {
@@ -23,13 +23,15 @@ func TestFixedBackoffStrategy(t *testing.T) {
 		assert.Equal(t, expectDelay, fixed.delay)
 	})
 
-	t.Run("SuccessGetNext", func(t *testing.T) {
+	t.Run("NextAlwaysSame", func(t *testing.T) {
 		expectDelay := 500 * time.Millisecond
 		fixed := NewFixed(expectDelay)
-		assert.NotNil(t, fixed)
-		assert.Equal(t, expectDelay, fixed.delay)
 
-		delay := fixed.Next(97911111)
-		assert.Equal(t, expectDelay, delay)
+		for i := 0; i < 5; i++ {
+			assert.Equal(t, expectDelay, fixed.Next())
+		}
+
+		fixed.Reset()
+		assert.Equal(t, expectDelay, fixed.Next())
 	})
 }

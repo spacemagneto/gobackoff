@@ -19,57 +19,66 @@ func TestExponentialStrategy(t *testing.T) {
 
 		assert.Equal(t, baseDelay, exponential.baseDelay)
 		assert.Equal(t, maxDelay, exponential.maxDelay)
-		assert.Equal(t, float64(2), exponential.step)
+		assert.Equal(t, DefaultStep, exponential.step)
 	})
 
 	t.Run("InitStrategyWithCustomStep", func(t *testing.T) {
-		baseDelay := 1 * time.Second
-		maxDelay := 10 * time.Second
-		step := 1.5
-
-		exponential := NewExponentialWithStep(baseDelay, maxDelay, step)
-		assert.NotNil(t, exponential)
-
-		assert.Equal(t, baseDelay, exponential.baseDelay)
-		assert.Equal(t, maxDelay, exponential.maxDelay)
-		assert.Equal(t, step, exponential.step)
+		exponential := NewExponential(time.Second, 10*time.Second, WithStep(1.5))
+		assert.Equal(t, 1.5, exponential.step)
 	})
 
-	t.Run("InitStrategyWithInvalidStep", func(t *testing.T) {
-		exp := NewExponentialWithStep(time.Second, time.Minute, -0.5)
-		assert.Equal(t, 2.0, exp.step)
-	})
+	t.Run("InitStrategyWithInvalidArgs", func(t *testing.T) {
+		exponential := NewExponential(0, -1*time.Second, WithStep(-0.5))
 
-	t.Run("InitStrategyWithInvalidAgrs", func(t *testing.T) {
-		exp := NewExponential(0, -1*time.Second)
-
-		assert.Equal(t, DefaultMinBackoff, exp.baseDelay)
-		assert.Equal(t, DefaultMaxBackoff, exp.maxDelay)
+		assert.Equal(t, DefaultMinBackoff, exponential.baseDelay)
+		assert.Equal(t, DefaultMaxBackoff, exponential.maxDelay)
+		assert.Equal(t, DefaultStep, exponential.step)
 	})
 
 	t.Run("InitStrategyWhenMaxLessThanBase", func(t *testing.T) {
 		baseDelay := 5 * time.Second
-		maxDelay := 1 * time.Second
-		exp := NewExponential(baseDelay, maxDelay)
+		exponential := NewExponential(baseDelay, time.Second)
 
-		assert.Equal(t, baseDelay, exp.maxDelay)
+		assert.Equal(t, baseDelay, exponential.maxDelay)
 	})
 
-	t.Run("SuccessGetNext", func(t *testing.T) {
-		baseDelay := 1 * time.Second
-		maxDelay := 10 * time.Second
+	t.Run("SequenceStartsAtBaseAndStopsAtCap", func(t *testing.T) {
+		exponential := NewExponential(time.Second, 10*time.Second)
 
-		exp := NewExponentialWithStep(baseDelay, maxDelay, 2)
-		delay := exp.Next(2)
-		assert.Equal(t, 4*time.Second, delay)
+		expected := []time.Duration{
+			1 * time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second,
+			10 * time.Second, 10 * time.Second,
+		}
+		for i, want := range expected {
+			assert.Equal(t, want, exponential.Next(), "call %d", i)
+		}
 	})
 
-	t.Run("SuccessGetNextWithGetMaxDelay", func(t *testing.T) {
-		baseDelay := 1 * time.Second
-		maxDelay := 10 * time.Second
+	t.Run("SequenceWithCustomStep", func(t *testing.T) {
+		exponential := NewExponential(time.Second, time.Minute, WithStep(1.5))
 
-		exp := NewExponentialWithStep(baseDelay, maxDelay, 2)
-		delay := exp.Next(4)
-		assert.Equal(t, maxDelay, delay)
+		assert.Equal(t, 1000*time.Millisecond, exponential.Next())
+		assert.Equal(t, 1500*time.Millisecond, exponential.Next())
+		assert.Equal(t, 2250*time.Millisecond, exponential.Next())
+	})
+
+	t.Run("AttemptStopsGrowingAtCap", func(t *testing.T) {
+		exponential := NewExponential(time.Second, 4*time.Second)
+
+		for i := 0; i < 100; i++ {
+			exponential.Next()
+		}
+
+		// 1s, 2s, 4s counter reaches cap on attempt 2 and stops 3
+		assert.Equal(t, 2, exponential.attempt)
+	})
+
+	t.Run("ResetStartsOverFromBase", func(t *testing.T) {
+		exponential := NewExponential(time.Second, 10*time.Second)
+		exponential.Next()
+		exponential.Next()
+
+		exponential.Reset()
+		assert.Equal(t, time.Second, exponential.Next())
 	})
 }

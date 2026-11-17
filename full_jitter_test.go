@@ -1,6 +1,7 @@
 package backoff
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -14,68 +15,78 @@ func TestFullJitterStrategy(t *testing.T) {
 		baseDelay := 1 * time.Second
 		maxDelay := 10 * time.Second
 
-		fullJitter := NewFullJitter(baseDelay, maxDelay)
-		assert.NotNil(t, fullJitter)
+		jitter := NewFullJitter(baseDelay, maxDelay)
+		assert.NotNil(t, jitter)
 
-		assert.Equal(t, baseDelay, fullJitter.baseDelay)
-		assert.Equal(t, maxDelay, fullJitter.maxDelay)
-	})
-
-	t.Run("InitStrategyWithDefaultValDelay", func(t *testing.T) {
-		fullJitter := NewFullJitter(0, 0)
-		assert.NotNil(t, fullJitter)
-
-		assert.Equal(t, DefaultMinBackoff, fullJitter.baseDelay)
-		assert.Equal(t, DefaultMaxBackoff, fullJitter.maxDelay)
+		assert.Equal(t, baseDelay, jitter.baseDelay)
+		assert.Equal(t, maxDelay, jitter.maxDelay)
+		assert.Equal(t, DefaultStep, jitter.step)
 	})
 
 	t.Run("InitStrategyWithInvalidArgs", func(t *testing.T) {
-		fullJitter := NewFullJitter(0, -10*time.Second)
-		assert.NotNil(t, fullJitter)
+		jitter := NewFullJitter(0, -10*time.Second, WithStep(1))
 
-		assert.Equal(t, DefaultMinBackoff, fullJitter.baseDelay)
-		assert.Equal(t, DefaultMaxBackoff, fullJitter.maxDelay)
+		assert.Equal(t, DefaultMinBackoff, jitter.baseDelay)
+		assert.Equal(t, DefaultMaxBackoff, jitter.maxDelay)
+		assert.Equal(t, DefaultStep, jitter.step)
 	})
 
 	t.Run("InitStrategyWhenMaxLessThanBase", func(t *testing.T) {
 		baseDelay := 5 * time.Second
-		maxDelay := 1 * time.Second
-		fullJitter := NewFullJitter(baseDelay, maxDelay)
+		jitter := NewFullJitter(baseDelay, time.Second)
 
-		assert.Equal(t, baseDelay, fullJitter.maxDelay)
+		assert.Equal(t, baseDelay, jitter.maxDelay)
 	})
 
-	t.Run("ReturnsNextInStrictRange", func(t *testing.T) {
+	t.Run("EachCallInRangeOfItsAttempt", func(t *testing.T) {
 		baseDelay := 100 * time.Millisecond
-		maxDelay := 10 * time.Second
-		fullJitter := NewFullJitter(baseDelay, maxDelay)
+		maxDelay := 2 * time.Second
 
-		// For attempt = 3:
-		// limit = 100ms * 2^3 = 800ms
-		// Expected range [0, 800ms]
-		maxExpected := 800 * time.Millisecond
+		for trial := 0; trial < 50; trial++ {
+			jitter := NewFullJitter(baseDelay, maxDelay)
 
-		for i := 0; i < 15; i++ {
-			delay := fullJitter.Next(3)
-			assert.True(t, delay >= 0)
-			assert.True(t, delay <= maxExpected)
+			for attempt := 0; attempt < 10; attempt++ {
+				limit := expLimit(baseDelay, maxDelay, DefaultStep, attempt)
+				delay := jitter.Next()
+
+				assert.GreaterOrEqual(t, delay, time.Duration(0))
+				assert.LessOrEqual(t, delay, limit, "attempt %d", attempt)
+			}
 		}
 	})
 
-	t.Run("CheckOverflow", func(t *testing.T) {
-		baseDelay := 1 * time.Second
-		maxDelay := 100 * time.Second
-		fullJitter := NewFullJitter(baseDelay, maxDelay)
+	t.Run("CustomStepChangesLimit", func(t *testing.T) {
+		// third call: limit = 1s * 3^2 = 9s
+		for trial := 0; trial < 50; trial++ {
+			jitter := NewFullJitter(time.Second, time.Minute, WithStep(3))
+			jitter.Next()
+			jitter.Next()
 
-		delay := fullJitter.Next(63)
-		assert.LessOrEqual(t, delay, maxDelay)
-		assert.GreaterOrEqual(t, delay, time.Duration(0))
+			assert.LessOrEqual(t, jitter.Next(), 9*time.Second)
+		}
 	})
 
-	t.Run("CheckMinDelay", func(t *testing.T) {
-		fullJitter := &FullJitter{baseDelay: 0, maxDelay: 0}
+	t.Run("ResetStartsOverFromFirstAttempt", func(t *testing.T) {
+		jitter := NewFullJitter(time.Second, 10*time.Second)
+		for i := 0; i < 5; i++ {
+			jitter.Next()
+		}
 
-		delay := fullJitter.Next(5)
-		assert.Equal(t, fullJitter.baseDelay, delay)
+		jitter.Reset()
+		assert.Equal(t, 0, jitter.attempt)
+		assert.LessOrEqual(t, jitter.Next(), time.Second)
+	})
+
+	t.Run("FormulaInRange", func(t *testing.T) {
+		for i := 0; i < 50; i++ {
+			delay := fullJitter(800 * time.Millisecond)
+			assert.GreaterOrEqual(t, delay, time.Duration(0))
+			assert.LessOrEqual(t, delay, 800*time.Millisecond)
+		}
+	})
+
+	t.Run("LimitAtMaxDurationDoesNotOverflow", func(t *testing.T) {
+		delay := fullJitter(time.Duration(math.MaxInt64))
+		assert.GreaterOrEqual(t, delay, time.Duration(0))
 	})
 }

@@ -1,6 +1,7 @@
 package backoff
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -14,87 +15,82 @@ func TestDecorrelatedJitter(t *testing.T) {
 		baseDelay := 1 * time.Second
 		maxDelay := 10 * time.Second
 
-		decorrelatedJitter := NewDecorrelatedJitter(baseDelay, maxDelay)
-		assert.NotNil(t, decorrelatedJitter)
+		jitter := NewDecorrelatedJitter(baseDelay, maxDelay)
+		assert.NotNil(t, jitter)
 
-		assert.Equal(t, baseDelay, decorrelatedJitter.baseDelay)
-		assert.Equal(t, maxDelay, decorrelatedJitter.maxDelay)
-	})
-
-	t.Run("InitStrategyWithDefaultValDelay", func(t *testing.T) {
-		decorrelatedJitter := NewDecorrelatedJitter(0, 0)
-		assert.NotNil(t, decorrelatedJitter)
-
-		assert.Equal(t, DefaultMinBackoff, decorrelatedJitter.baseDelay)
-		assert.Equal(t, DefaultMaxBackoff, decorrelatedJitter.maxDelay)
+		assert.Equal(t, baseDelay, jitter.baseDelay)
+		assert.Equal(t, maxDelay, jitter.maxDelay)
 	})
 
 	t.Run("InitStrategyWithInvalidArgs", func(t *testing.T) {
-		decorrelatedJitter := NewDecorrelatedJitter(0, -10*time.Second)
-		assert.NotNil(t, decorrelatedJitter)
+		jitter := NewDecorrelatedJitter(0, -10*time.Second)
 
-		assert.Equal(t, DefaultMinBackoff, decorrelatedJitter.baseDelay)
-		assert.Equal(t, DefaultMaxBackoff, decorrelatedJitter.maxDelay)
+		assert.Equal(t, DefaultMinBackoff, jitter.baseDelay)
+		assert.Equal(t, DefaultMaxBackoff, jitter.maxDelay)
 	})
 
 	t.Run("InitStrategyWhenMaxLessThanBase", func(t *testing.T) {
 		baseDelay := 5 * time.Second
-		maxDelay := 1 * time.Second
+		jitter := NewDecorrelatedJitter(baseDelay, time.Second)
 
-		decorrelatedJitter := NewDecorrelatedJitter(baseDelay, maxDelay)
-
-		assert.Equal(t, baseDelay, decorrelatedJitter.maxDelay)
+		assert.Equal(t, baseDelay, jitter.maxDelay)
 	})
 
-	t.Run("SuccessGetNext", func(t *testing.T) {
+	t.Run("FirstCallReturnsBase", func(t *testing.T) {
+		decoratedJitter := NewDecorrelatedJitter(time.Second, 10*time.Second)
+		assert.Equal(t, time.Second, decoratedJitter.Next())
+	})
+
+	t.Run("EachCallInRangeOfPrevious", func(t *testing.T) {
 		baseDelay := 1 * time.Second
 		maxDelay := 10 * time.Second
 
-		decorrelatedJitter := NewDecorrelatedJitter(baseDelay, maxDelay)
-		delay := decorrelatedJitter.Next(1)
-		assert.True(t, delay >= 0)
-	})
+		for trial := 0; trial < 50; trial++ {
+			jitter := NewDecorrelatedJitter(baseDelay, maxDelay)
 
-	t.Run("CheckMinDelay", func(t *testing.T) {
-		baseDelay := 1 * time.Second
-		maxDelay := 10 * time.Second
+			prev := time.Duration(0)
+			for i := 0; i < 20; i++ {
+				high := min(maxDelay, max(baseDelay, prev*3))
+				delay := jitter.Next()
 
-		decorrelatedJitter := NewDecorrelatedJitter(baseDelay, maxDelay)
-		assert.Equal(t, baseDelay, decorrelatedJitter.Next(0))
-	})
+				assert.GreaterOrEqual(t, delay, baseDelay)
+				assert.LessOrEqual(t, delay, high, "call %d after %v", i, prev)
 
-	t.Run("ReturnsNextInStrictRange", func(t *testing.T) {
-		baseDelay := 1 * time.Second
-		maxDelay := 10 * time.Second
-
-		decorrelatedJitter := NewDecorrelatedJitter(baseDelay, maxDelay)
-
-		// If the previous delay was 2 seconds:
-		// high = min(10s, 2s * 3) = 6s
-		// The range should be [baseDelay, high], i.e. [1s, 6s]
-		minExpected := 1 * time.Second
-		maxExpected := 6 * time.Second
-
-		for i := 0; i < 15; i++ {
-			delay := decorrelatedJitter.Next(int64(2 * time.Second))
-			assert.True(t, delay >= minExpected, "Delay %v should be >= %v", delay, minExpected)
-			assert.True(t, delay < maxExpected, "Delay %v should be < %v", delay, maxExpected)
+				prev = delay
+			}
 		}
 	})
 
-	t.Run("ReturnsNextWithHighExceedsMaxDelay", func(t *testing.T) {
-		baseDelay := 1 * time.Second
-		maxDelay := 5 * time.Second
-
-		decorrelatedJitter := NewDecorrelatedJitter(baseDelay, maxDelay)
-
-		// When transferring 10s: high = 10s * 3 = 30s.
-		// 30s > 5s (maxDelay), so high will be 5s.
-		// Expected range: [1s, 5s]
-		for i := 0; i < 15; i++ {
-			delay := decorrelatedJitter.Next(int64(10 * time.Second))
-			assert.True(t, delay >= baseDelay)
-			assert.True(t, delay <= maxDelay)
+	t.Run("ResetForgetsPrevious", func(t *testing.T) {
+		jitter := NewDecorrelatedJitter(time.Second, 10*time.Second)
+		for i := 0; i < 5; i++ {
+			jitter.Next()
 		}
+
+		jitter.Reset()
+		assert.Equal(t, time.Second, jitter.Next())
+	})
+
+	t.Run("FormulaInRange", func(t *testing.T) {
+		// prev 2s: range [1s, min(10s, 6s)] = [1s, 6s]
+		for i := 0; i < 50; i++ {
+			delay := decorrelatedJitter(time.Second, 10*time.Second, 2*time.Second)
+			assert.GreaterOrEqual(t, delay, time.Second)
+			assert.LessOrEqual(t, delay, 6*time.Second)
+		}
+
+		// prev 10s: prev*3 above cap, range [1s, 5s]
+		for i := 0; i < 50; i++ {
+			delay := decorrelatedJitter(time.Second, 5*time.Second, 10*time.Second)
+			assert.GreaterOrEqual(t, delay, time.Second)
+			assert.LessOrEqual(t, delay, 5*time.Second)
+		}
+	})
+
+	t.Run("HugePreviousDoesNotOverflow", func(t *testing.T) {
+		maxDelay := time.Duration(math.MaxInt64)
+		delay := decorrelatedJitter(time.Second, maxDelay, maxDelay)
+
+		assert.GreaterOrEqual(t, delay, time.Second)
 	})
 }
