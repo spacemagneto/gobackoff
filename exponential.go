@@ -28,9 +28,9 @@ type Exponential struct {
 // growth factor def to DefaultStep unless WithStep is passed
 func NewExponential(baseDelay, maxDelay time.Duration, opts ...Option) *Exponential {
 	baseDelay, maxDelay = normalizeBounds(baseDelay, maxDelay)
-	o := applyOptions(opts)
+	options := applyOptions(opts)
 
-	return &Exponential{baseDelay: baseDelay, maxDelay: maxDelay, step: o.step}
+	return &Exponential{baseDelay: baseDelay, maxDelay: maxDelay, step: options.step}
 }
 
 // Next returns delay for current attempt and advances to next one
@@ -49,12 +49,4 @@ func (e *Exponential) Next() time.Duration {
 // Reset restarts chain from base delay
 func (e *Exponential) Reset() {
 	e.attempt = 0
-}
-
-// ExponentialDelay is stateless version of Exponential for callers tracking attempt number themselves
-// arguments are normalized same way as in NewExponential and WithStep negative attempt counts as 0
-func ExponentialDelay(baseDelay, maxDelay time.Duration, step float64, attempt int) time.Duration {
-	baseDelay, maxDelay = normalizeBounds(baseDelay, maxDelay)
-
-	return expLimit(baseDelay, maxDelay, normalizeStep(step), attempt)
 }
