@@ -14,9 +14,16 @@ import (
 //
 // Reference: https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/
 type FullJitter struct {
-	baseDelay, maxDelay time.Duration
-	step                float64
-	attempt             int
+	baseDelay time.Duration
+	maxDelay  time.Duration
+	step      float64
+
+	// NOTE: why i dont use mutex, atomic, why? isnt not solved race cond problem
+	// state belongs to retry chain, isnt shared strategy
+	// look if first goroutine got err Next return 1s,
+	// second goroutine got error Next return 2s instead of 1s
+	// under load counter hits cap immediately and all goroutines sleep max delay
+	attempt int
 }
 
 // NewFullJitter creates FullJitter strategy.
