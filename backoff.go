@@ -15,12 +15,12 @@ const (
 	DefaultStep = 2.0
 )
 
-// Backoff hands out delays for one chain of retries.
+// Backoff provides delays for single retry chain
 //
-// Strategy keeps its own state (attempt counter or previous delay), so caller
-// just asks for the next delay and never has to track anything. The flip side:
-// one instance serves one chain and is not safe for concurrent use.
-// Create a new instance per chain, or call Reset when the chain is over.
+// Strategy tracks its own state (attempt counter or last delay)
+// so caller just asks for next delay without track any
+// One instance serves single chain and isnt safe for concurrent use
+// create new instance per chain, or call Reset when chain finish
 type Backoff interface {
 	// Next returns the delay before the next retry.
 	// It never exceeds the cap set at initialization.
